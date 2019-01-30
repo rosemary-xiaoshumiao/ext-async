@@ -986,16 +986,15 @@ static int send_handshake_bytes(async_stream *stream, async_ssl_handshake_data *
 	uv_write_t req;
 	uv_buf_t bufs[1];
 
-	char *base;
+	BUF_MEM *buffer;
 	size_t len;
 	int code;
 
-	while ((len = BIO_ctrl_pending(stream->ssl.wbio)) > 0) {
-		// TODO: Avoid memory alloc & copy by using BIO_get_mem_data()
-		base = emalloc(len);
-		len = BIO_read(stream->ssl.wbio, base, len);
+	while (BIO_ctrl_pending(stream->ssl.wbio) > 0) {
+		BIO_get_mem_ptr(stream->ssl.wbio, &buffer);
 		
-		bufs[0] = uv_buf_init(base, len);
+		len = buffer->length;
+		bufs[0] = uv_buf_init(buffer->data, len);
 		
 		while (bufs[0].len > 0) {
 			code = uv_try_write(stream->handle, bufs, 1);
@@ -1005,7 +1004,6 @@ static int send_handshake_bytes(async_stream *stream, async_ssl_handshake_data *
 			}
 			
 			if (code < 0) {
-				efree(base);				
 				data->uv_error = code;
 		
 				return FAILURE;
@@ -1013,44 +1011,41 @@ static int send_handshake_bytes(async_stream *stream, async_ssl_handshake_data *
 			
 			bufs[0].base += code;
 			bufs[0].len -= code;
+			
+			buffer->length -= code;
+			len -= code;
 		}
 		
 		if (bufs[0].len == 0) {
-			efree(base);
-			
 			continue;
 		}
 		
 		code = uv_write(&req, stream->handle, bufs, 1, send_handshake_bytes_cb);
 		
-		if (code < 0) {
-			efree(base);
-			data->uv_error = code;
-		
-			return FAILURE;
-		}
-		
-		ASYNC_ALLOC_CUSTOM_OP(op, sizeof(async_uv_op));
-		
-		req.data = op;
-		
-		if (await_op(stream, (async_op *) op) == FAILURE) {
-			efree(base);
-			ASYNC_FREE_OP(op);
+		if (code == 0) {
+			ASYNC_ALLOC_CUSTOM_OP(op, sizeof(async_uv_op));
 			
-			return FAILURE;
+			req.data = op;
+			
+			if (await_op(stream, (async_op *) op) == FAILURE) {
+				ASYNC_FORWARD_OP_ERROR(op);
+				ASYNC_FREE_OP(op);
+				
+				return FAILURE;
+			}
+			
+			code = op->code;
+			
+			ASYNC_FREE_OP(op);
 		}
-		
-		code = op->code;
-		
-		efree(base);
-		ASYNC_FREE_OP(op);
 		
 		if (code < 0) {
 			data->uv_error = code;
 		
 			return FAILURE;
 		}
+		
+		buffer->length -= len;
 	}
 	
 	return SUCCESS;
