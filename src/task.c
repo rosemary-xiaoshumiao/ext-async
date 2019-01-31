@@ -314,6 +314,8 @@ ASYNC_API int async_await_op(async_op *op)
 	async_task *task;
 	async_task_scheduler *scheduler;
 	async_context *context;
+	
+	zend_bool cancellable;
 
 	ZEND_ASSERT(op->status == ASYNC_OP_PENDING);
 
@@ -350,8 +352,9 @@ ASYNC_API int async_await_op(async_op *op)
 		ASYNC_OP_CHECK_ERROR(op, task->scheduler->flags & ASYNC_TASK_SCHEDULER_FLAG_DISPOSED, "Cannot await after the task scheduler has been disposed");
 		
 		context = ASYNC_G(current_context);
+		cancellable = !(op->flags & ASYNC_OP_FLAG_ATOMIC) && context->cancel != NULL;
 		
-		if (context->cancel != NULL) {
+		if (cancellable) {
 			if (context->cancel->flags & ASYNC_CONTEXT_CANCELLATION_FLAG_TRIGGERED) {
 				op->status = ASYNC_STATUS_FAILED;
 				
@@ -379,7 +382,7 @@ ASYNC_API int async_await_op(async_op *op)
 	
 		async_fiber_context_yield();
 		
-		if (context->cancel != NULL) {
+		if (cancellable) {
 			ASYNC_DELREF(&context->std);
 			
 			if (op->cancel.object != NULL) {

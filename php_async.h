@@ -300,6 +300,7 @@ struct _async_cancel_cb {
 
 #define ASYNC_OP_FLAG_CANCELLED 1
 #define ASYNC_OP_FLAG_DEFER 2
+#define ASYNC_OP_FLAG_ATOMIC 4
 
 typedef enum {
 	ASYNC_STATUS_PENDING,
